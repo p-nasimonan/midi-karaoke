@@ -9,6 +9,8 @@ interface ControlsProps {
   fileName: string | null
   volume: number
   onVolumeChange: (v: number) => void
+  transpose: number
+  onTransposeChange: (semitones: number) => void
 }
 
 const btnBase: React.CSSProperties = {
@@ -31,11 +33,31 @@ function Btn({ style, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>)
   return <button style={{ ...btnBase, ...style }} {...props} />
 }
 
+const iconBtn: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 26,
+  height: 26,
+  borderRadius: 6,
+  border: '1px solid var(--border-dim)',
+  background: 'transparent',
+  color: 'rgba(0,207,255,0.6)',
+  fontFamily: 'var(--font-display)',
+  fontSize: 14,
+  lineHeight: 1,
+  cursor: 'pointer',
+  transition: 'all 0.12s ease',
+}
+
 export function Controls({
   isPlaying, hasFile,
   onPlay, onStop, onOpenFile,
   fileName, volume, onVolumeChange,
+  transpose, onTransposeChange,
 }: ControlsProps) {
+  const transposeLabel = transpose === 0 ? '±0' : transpose > 0 ? `+${transpose}` : `${transpose}`
+
   return (
     <div style={{
       display: 'flex',
@@ -82,6 +104,42 @@ export function Controls({
         }}>
           {volume}%
         </span>
+      </div>
+
+      {/* Key transpose */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 9,
+          letterSpacing: '0.15em',
+          color: 'rgba(0,207,255,0.45)',
+        }}>
+          KEY
+        </span>
+        <button
+          style={iconBtn}
+          onClick={() => onTransposeChange(transpose - 1)}
+          disabled={transpose <= -12}
+        >
+          −
+        </button>
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          color: transpose !== 0 ? 'var(--cyan)' : 'rgba(0,207,255,0.45)',
+          minWidth: 26,
+          textAlign: 'center',
+          letterSpacing: '0.05em',
+        }}>
+          {transposeLabel}
+        </span>
+        <button
+          style={iconBtn}
+          onClick={() => onTransposeChange(transpose + 1)}
+          disabled={transpose >= 12}
+        >
+          +
+        </button>
       </div>
 
       {/* Open file */}

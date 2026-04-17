@@ -1,9 +1,10 @@
-import { useRef, useCallback, useState, useEffect, useLayoutEffect } from 'react'
+import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useMidi } from './hooks/useMidi'
 import { usePitchDetection } from './hooks/usePitchDetection'
 import { DropZone } from './components/DropZone'
 import { Controls } from './components/Controls'
 import { KaraokeCanvas } from './components/KaraokeCanvas'
+import { InfoSection } from './components/InfoSection'
 import { isOnPitch } from './utils/pitchUtils'
 
 export default function App() {
@@ -15,6 +16,15 @@ export default function App() {
   const midi = useMidi()
   const pitch = usePitchDetection()
 
+  // Transpose notes for display and scoring
+  const transposedParsed = useMemo(() => {
+    if (!midi.parsed || midi.transpose === 0) return midi.parsed
+    return {
+      ...midi.parsed,
+      notes: midi.parsed.notes.map(n => ({ ...n, midi: n.midi + midi.transpose })),
+    }
+  }, [midi.parsed, midi.transpose])
+
   // Auto-start mic on mount
   useEffect(() => {
     pitch.startMic()
@@ -23,12 +33,12 @@ export default function App() {
   // Keep refs current for score interval and keyboard handlers
   const currentTimeRef = useRef(midi.currentTime)
   const frequencyRef = useRef(pitch.frequency)
-  const parsedRef = useRef(midi.parsed)
+  const parsedRef = useRef(transposedParsed)
   const isPlayingRef = useRef(midi.isPlaying)
   useLayoutEffect(() => {
     currentTimeRef.current = midi.currentTime
     frequencyRef.current = pitch.frequency
-    parsedRef.current = midi.parsed
+    parsedRef.current = transposedParsed
     isPlayingRef.current = midi.isPlaying
   })
 
@@ -109,11 +119,13 @@ export default function App() {
   }, [midi.isPlaying])
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      width: '100%', height: '100%',
-      background: 'var(--bg-deep)', overflow: 'hidden',
-    }}>
+    <div style={{ width: '100%', height: '100%', overflowY: 'auto', background: 'var(--bg-deep)' }}>
+
+      {/* ── App section ── */}
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        width: '100%', height: '88vh',
+      }}>
       {/* Header */}
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -150,9 +162,9 @@ export default function App() {
             letterSpacing: '0.1em',
           }}>
             {formatTime(midi.currentTime)}
-            {midi.parsed && (
+            {transposedParsed && (
               <span style={{ color: 'var(--text-dim)' }}>
-                {' / '}{formatTime(midi.parsed.duration)}
+                {' / '}{formatTime(transposedParsed.duration)}
               </span>
             )}
           </div>
@@ -161,9 +173,9 @@ export default function App() {
 
       {/* Main */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
-        {midi.parsed ? (
+        {transposedParsed ? (
           <KaraokeCanvas
-            parsed={midi.parsed}
+            parsed={transposedParsed}
             currentTime={midi.currentTime}
             userFrequency={pitch.frequency}
             isPlaying={midi.isPlaying}
@@ -188,7 +200,7 @@ export default function App() {
           </div>
         )}
 
-        {midi.parsed && !midi.isPlaying && (
+        {transposedParsed && !midi.isPlaying && (
           <button
             onClick={handleOpenFile}
             style={{
@@ -213,6 +225,8 @@ export default function App() {
         fileName={midi.fileName}
         volume={midi.volume}
         onVolumeChange={midi.setVolume}
+        transpose={midi.transpose}
+        onTransposeChange={midi.setTranspose}
       />
 
       <input
@@ -226,6 +240,11 @@ export default function App() {
           e.target.value = ''
         }}
       />
+      </div>{/* end app section */}
+
+      {/* ── Info section ── */}
+      <InfoSection />
+
     </div>
   )
 }

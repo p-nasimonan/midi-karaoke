@@ -78,6 +78,8 @@ interface UseMidiReturn {
   error: string | null
   volume: number
   setVolume: (v: number) => void
+  transpose: number
+  setTranspose: (semitones: number) => void
 }
 
 export function useMidi(): UseMidiReturn {
@@ -87,6 +89,14 @@ export function useMidi(): UseMidiReturn {
   const [fileName, setFileName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [volume, setVolumeState] = useState(100)
+
+  const [transpose, setTransposeState] = useState(0)
+  const transposeRef = useRef(0)
+  const setTranspose = useCallback((semitones: number) => {
+    const t = Math.max(-12, Math.min(12, semitones))
+    setTransposeState(t)
+    transposeRef.current = t
+  }, [])
 
   const rawMidiRef = useRef<Midi | null>(null)
   const synthsRef = useRef<Tone.PolySynth[]>([])
@@ -181,7 +191,7 @@ export function useMidi(): UseMidiReturn {
       type NoteEvent = { freq: number; dur: number; vel: number }
       const events: Array<{ time: number } & NoteEvent> = track.notes.map(n => ({
         time: n.time,
-        freq: Tone.Frequency(n.midi, 'midi').toFrequency(),
+        freq: Tone.Frequency(n.midi + transposeRef.current, 'midi').toFrequency(),
         dur: Math.max(n.duration, 0.03),
         vel: isMelody ? n.velocity * 0.35 : n.velocity,
       }))
@@ -232,5 +242,5 @@ export function useMidi(): UseMidiReturn {
     cancelAnimationFrame(rafRef.current)
   }, [clearParts])
 
-  return { loadMidi, play, stop, isPlaying, currentTime, parsed, fileName, error, volume, setVolume }
+  return { loadMidi, play, stop, isPlaying, currentTime, parsed, fileName, error, volume, setVolume, transpose, setTranspose }
 }

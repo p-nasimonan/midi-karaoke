@@ -19,7 +19,6 @@ const COLORS = {
   axisLabel: 'rgba(0, 207, 255, 0.3)',
 }
 
-const DISTANCE_GATE_SEMITONES = 24
 const TRAIL_DURATION = 2.5   // seconds of trail to keep
 
 interface TrailPoint {
@@ -35,6 +34,7 @@ export class KaraokeRenderer {
 
   private trail: TrailPoint[] = []
   private smoothedMidi: number | null = null
+  private wasPlaying = false
 
   constructor(canvas: HTMLCanvasElement, options: Partial<RendererOptions> = {}) {
     this.canvas = canvas
@@ -56,6 +56,13 @@ export class KaraokeRenderer {
     const { canvas, ctx, options } = this
     const W = canvas.width
     const H = canvas.height
+
+    // Clear trail when playback stops
+    if (this.wasPlaying && !state.isPlaying) {
+      this.trail = []
+      this.smoothedMidi = null
+    }
+    this.wasPlaying = state.isPlaying
 
     ctx.clearRect(0, 0, W, H)
     this.drawBackground(W, H)
@@ -93,92 +100,114 @@ export class KaraokeRenderer {
     this.drawAxisLabels(options.minMidi, options.maxMidi, midiToY)
   }
 
-  // ── User voice: trail + current bar ──────────────────────────────────────
+  // ── User voice: trail ribbon + current bar ───────────────────────────────
 
   private drawUserVoice(
     state: RendererState,
-    W: number,
+    _W: number,
     playheadPx: number,
     timeToX: (t: number) => number,
     midiToY: (m: number) => number,
     barH: number,
     visibleNotes: NoteBar[],
   ) {
-    const { ctx } = this
     const freq = state.userFrequency
-    if (freq === null || freq <= 0) {
-      this.smoothedMidi = null
-      return
+    const hasFreq = freq !== null && freq > 0
+
+    if (hasFreq) {
+      const rawMidi = freqToMidi(freq!)
+
+      // Find nearest guide note for pitch-hit coloring
+      let activeNote: NoteBar | null = null
+      let minDist = Infinity
+      for (const n of visibleNotes) {
+        if (n.endTime < state.currentTime - 1 || n.startTime > state.currentTime + 1) continue
+        const d = Math.abs(n.midi - rawMidi)
+        if (d < minDist) { minDist = d; activeNote = n }
+      }
+      const isNoteActiveNow = activeNote !== null
+        && activeNote.startTime <= state.currentTime
+        && activeNote.endTime >= state.currentTime
+      const onPitch = isNoteActiveNow && isOnPitch(freq!, activeNote!.midi, 50)
+
+      // Heavy smoothing + deadband: only move when delta > 0.35 semitones
+      if (this.smoothedMidi === null) {
+        this.smoothedMidi = rawMidi
+      } else if (Math.abs(rawMidi - this.smoothedMidi) > 0.35) {
+        this.smoothedMidi = this.smoothedMidi * 0.90 + rawMidi * 0.10
+      }
+
+      // Accumulate trail only while playing
+      if (state.isPlaying) {
+        this.trail.push({ time: state.currentTime, midi: this.smoothedMidi, onPitch })
+        const cutoff = state.currentTime - TRAIL_DURATION
+        let start = 0
+        while (start < this.trail.length && this.trail[start].time < cutoff) start++
+        if (start > 0) this.trail = this.trail.slice(start)
+      }
     }
+    // When freq is null: keep smoothedMidi, keep trail — they scroll off naturally
 
-    const rawMidi = freqToMidi(freq)
+    // Always render trail ribbon (even during momentary silence)
+    this.drawTrailRibbon(timeToX, midiToY, barH)
 
-    // Distance gate: ignore if too far from any note near current time
-    let minDist = Infinity
-    let activeNote: NoteBar | null = null
-    for (const n of visibleNotes) {
-      if (n.endTime < state.currentTime - 1 || n.startTime > state.currentTime + 1) continue
-      const d = Math.abs(n.midi - rawMidi)
-      if (d < minDist) { minDist = d; activeNote = n }
-    }
-    if (minDist > DISTANCE_GATE_SEMITONES) {
-      this.smoothedMidi = null
-      return
-    }
-
-    // Blue only when a guide note is CURRENTLY active AND user is on pitch
-    const isNoteActiveNow = activeNote !== null
-      && activeNote.startTime <= state.currentTime
-      && activeNote.endTime >= state.currentTime
-    const onPitch = isNoteActiveNow && isOnPitch(freq, activeNote!.midi, 50)
-
-    // Exponential smoothing for vertical position
-    this.smoothedMidi = this.smoothedMidi === null
-      ? rawMidi
-      : this.smoothedMidi * 0.72 + rawMidi * 0.28
-    const displayMidi = this.smoothedMidi
-
-    // Accumulate trail while playing
-    if (state.isPlaying) {
-      this.trail.push({ time: state.currentTime, midi: displayMidi, onPitch })
-      const cutoff = state.currentTime - TRAIL_DURATION
-      let start = 0
-      while (start < this.trail.length && this.trail[start].time < cutoff) start++
-      if (start > 0) this.trail = this.trail.slice(start)
-    }
-
-    // Draw trail as fading dots scrolling with the timeline
-    for (const pt of this.trail) {
-      const tx = timeToX(pt.time)
-      if (tx < 0 || tx > W) continue
-      const ty = midiToY(pt.midi)
-      const age = state.currentTime - pt.time
-      const alpha = (1 - age / TRAIL_DURATION) * 0.55
-      const dotR = Math.max(2, barH * 0.28)
-
+    // Draw current bar at playhead only while actively singing
+    if (hasFreq && this.smoothedMidi !== null) {
+      const { ctx } = this
+      const lastPt = this.trail[this.trail.length - 1]
+      const onPitch = lastPt?.onPitch ?? false
+      const color = onPitch ? COLORS.userOnPitch : COLORS.userOffPitch
+      const glow  = onPitch ? COLORS.userOnPitchGlow : COLORS.userOffPitchGlow
+      const barW = 56
+      const x = playheadPx - barW / 2
+      const y = midiToY(this.smoothedMidi) - barH / 2
       ctx.save()
-      ctx.globalAlpha = alpha
-      ctx.fillStyle = pt.onPitch ? COLORS.userOnPitch : COLORS.userOffPitch
-      ctx.beginPath()
-      ctx.arc(tx, ty, dotR, 0, Math.PI * 2)
+      ctx.shadowColor = glow
+      ctx.shadowBlur = onPitch ? 18 : 10
+      ctx.fillStyle = color
+      ctx.globalAlpha = 0.92
+      this.roundRect(x, y, barW, barH, barH / 2)
       ctx.fill()
       ctx.restore()
     }
+  }
 
-    // Draw current bar at playhead
-    const color = onPitch ? COLORS.userOnPitch : COLORS.userOffPitch
-    const glow = onPitch ? COLORS.userOnPitchGlow : COLORS.userOffPitchGlow
-    const barW = 56
-    const x = playheadPx - barW / 2
-    const y = midiToY(displayMidi) - barH / 2
+  // Draw trail as a continuous ribbon, segmented by onPitch color.
+  // Time gaps > 0.15 s (silence breaks) lift the pen.
+  private drawTrailRibbon(
+    timeToX: (t: number) => number,
+    midiToY: (m: number) => number,
+    barH: number,
+  ) {
+    if (this.trail.length < 2) return
+    const { ctx } = this
 
     ctx.save()
-    ctx.shadowColor = glow
-    ctx.shadowBlur = onPitch ? 18 : 10
-    ctx.fillStyle = color
-    ctx.globalAlpha = 0.92
-    this.roundRect(x, y, barW, barH, barH / 2)
-    ctx.fill()
+    ctx.lineWidth = barH
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.globalAlpha = 0.65
+
+    let i = 0
+    while (i < this.trail.length) {
+      const onPitch = this.trail[i].onPitch
+      ctx.beginPath()
+      ctx.strokeStyle = onPitch ? COLORS.userOnPitch : COLORS.userOffPitch
+      ctx.moveTo(timeToX(this.trail[i].time), midiToY(this.trail[i].midi))
+
+      let j = i + 1
+      for (; j < this.trail.length; j++) {
+        // Silence gap → lift pen (do NOT draw to j)
+        if (this.trail[j].time - this.trail[j - 1].time > 0.15) break
+        ctx.lineTo(timeToX(this.trail[j].time), midiToY(this.trail[j].midi))
+        // Color change → include this point then hand off to next segment
+        if (this.trail[j].onPitch !== onPitch) { j++; break }
+      }
+      ctx.stroke()
+      // j is either: past a gap (not drawn), a color-change overlap, or trail end
+      i = j
+    }
+
     ctx.restore()
   }
 

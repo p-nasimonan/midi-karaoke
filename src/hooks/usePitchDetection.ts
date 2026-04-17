@@ -24,7 +24,7 @@ interface UsePitchDetectionReturn {
 }
 
 // Module-level WASM cache
-let wasmDetect: ((samples: Float32Array, sampleRate: number, threshold: number) => number) | null = null
+let wasmDetect: ((samples: Float32Array, sampleRate: number, threshold: number, minFreq: number, maxFreq: number) => number) | null = null
 let wasmLoadAttempted = false
 
 async function loadWasm() {
@@ -73,7 +73,7 @@ export function usePitchDetection(): UsePitchDetectionReturn {
       setPitchState({ frequency: null, midiNote: null })
     } else {
       const rawFreq = wasmDetect
-        ? wasmDetect(buffer, sampleRate, 0.15)
+        ? wasmDetect(buffer, sampleRate, 0.15, MIN_FREQ, MAX_FREQ)
         : detectPitchYIN(buffer, sampleRate, 0.15)
 
       if (rawFreq > MIN_FREQ && rawFreq < MAX_FREQ) {
@@ -112,8 +112,15 @@ export function usePitchDetection(): UsePitchDetectionReturn {
       const analyser = ctx.createAnalyser()
       analyser.fftSize = FFT_SIZE
       analyser.smoothingTimeConstant = 0
+
+      const lpf = ctx.createBiquadFilter()
+      lpf.type = 'lowpass'
+      lpf.frequency.value = 1000  // cut harmonics/sibilance above 1kHz
+      lpf.Q.value = 0.7
+
       const source = ctx.createMediaStreamSource(stream)
-      source.connect(analyser)
+      source.connect(lpf)
+      lpf.connect(analyser)
       analyserRef.current = analyser
       bufferRef.current = new Float32Array(FFT_SIZE)
 
