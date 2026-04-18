@@ -24,8 +24,7 @@ const features: { tag: string; title: string; body: string }[] = [
 const steps: { step: string; text: string }[] = [
   { step: '1', text: '「OPEN」ボタン、またはファイルをドラッグ＆ドロップで .mid / .midi を読み込む' },
   { step: '2', text: '「PLAY」ボタンかスペースキーで再生スタート' },
-  { step: '3', text: 'マイクに向かって歌う。歌声バーがガイドバーに重なれば正解！' },
-  { step: '4', text: '「STOP」で止めてスコアを確認。次の曲も続けて読み込めます' },
+  { step: '3', text: 'マイクに向かって歌う。歌声バーがガイドバーに重なれば正解！' }
 ]
 
 const S = {

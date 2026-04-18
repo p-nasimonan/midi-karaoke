@@ -21,8 +21,7 @@ export interface RendererState {
 }
 
 export interface RendererOptions {
-  visibleTimeRange: number   // seconds of notes visible on screen (default 4)
-  playheadX: number          // 0-1, fraction from left where playhead sits
+  pageSeconds: number  // seconds per page (default 4)
   minMidi: number
   maxMidi: number
 }

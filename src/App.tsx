@@ -6,6 +6,7 @@ import { Controls } from './components/Controls'
 import { KaraokeCanvas } from './components/KaraokeCanvas'
 import { InfoSection } from './components/InfoSection'
 import { isOnPitch } from './utils/pitchUtils'
+import { getNoteRange } from './utils/midiUtils'
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -25,6 +26,38 @@ export default function App() {
     }
   }, [midi.parsed, midi.transpose])
 
+  // MIDI note range of the loaded song (updated when transpose changes)
+  const midiRange = useMemo(() => {
+    if (!transposedParsed) return null
+    return getNoteRange(transposedParsed.notes)
+  }, [transposedParsed])
+
+  // Active guide note at the current playhead position (used for octave correction)
+  const activeMidi = useMemo(() => {
+    if (!transposedParsed) return null
+    return transposedParsed.notes.find(
+      n => n.startTime <= midi.currentTime && n.endTime >= midi.currentTime
+    )?.midi ?? null
+  }, [transposedParsed, midi.currentTime])
+
+  // Octave correction: pick freq/2, freq, or freq*2 closest to the active guide note.
+  // Then reject the result if it falls outside the song's displayed MIDI range (±4 st).
+  const correctedFrequency = useMemo(() => {
+    const freq = pitch.frequency
+    if (!freq) return null
+    const toMidi = (f: number) => 12 * Math.log2(f / 440) + 69
+    const candidates = [freq / 2, freq, freq * 2].filter(c => c > 50 && c < 1400)
+    const best = activeMidi !== null
+      ? candidates.reduce((b, c) => Math.abs(toMidi(c) - activeMidi) < Math.abs(toMidi(b) - activeMidi) ? c : b)
+      : freq
+    // Discard detections outside the song's range (display margin + 4 st)
+    if (midiRange) {
+      const m = toMidi(best)
+      if (m < midiRange.min - 4 || m > midiRange.max + 4) return null
+    }
+    return best
+  }, [pitch.frequency, activeMidi, midiRange])
+
   // Auto-start mic on mount
   useEffect(() => {
     pitch.startMic()
@@ -32,12 +65,12 @@ export default function App() {
 
   // Keep refs current for score interval and keyboard handlers
   const currentTimeRef = useRef(midi.currentTime)
-  const frequencyRef = useRef(pitch.frequency)
+  const frequencyRef = useRef(correctedFrequency)
   const parsedRef = useRef(transposedParsed)
   const isPlayingRef = useRef(midi.isPlaying)
   useLayoutEffect(() => {
     currentTimeRef.current = midi.currentTime
-    frequencyRef.current = pitch.frequency
+    frequencyRef.current = correctedFrequency
     parsedRef.current = transposedParsed
     isPlayingRef.current = midi.isPlaying
   })
@@ -52,7 +85,7 @@ export default function App() {
       const active = parsed.notes.find(
         n => n.startTime <= currentTimeRef.current && n.endTime >= currentTimeRef.current
       )
-      if (active && isOnPitch(frequencyRef.current, active.midi, 50)) {
+      if (active && isOnPitch(frequencyRef.current, active.midi, 75)) {
         setHitCount(h => h + 1)
       }
     }, 100)
@@ -124,7 +157,7 @@ export default function App() {
       {/* ── App section ── */}
       <div style={{
         display: 'flex', flexDirection: 'column',
-        width: '100%', height: '88vh',
+        width: '100%', height: '70vh',
       }}>
       {/* Header */}
       <header style={{
@@ -177,7 +210,7 @@ export default function App() {
           <KaraokeCanvas
             parsed={transposedParsed}
             currentTime={midi.currentTime}
-            userFrequency={pitch.frequency}
+            userFrequency={correctedFrequency}
             isPlaying={midi.isPlaying}
             scorePercent={scorePercent}
           />

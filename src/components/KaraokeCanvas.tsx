@@ -19,8 +19,6 @@ export function KaraokeCanvas({
   const rendererRef = useRef<KaraokeRenderer | null>(null)
   const rafRef = useRef<number>(0)
 
-  // Keep latest render state in a ref so the RAF loop always reads fresh values
-  // without needing to restart the loop on every prop change.
   const stateRef = useRef<RendererState>({
     currentTime, notes: parsed?.notes ?? [], lyrics: parsed?.lyrics ?? [],
     userFrequency, isPlaying, scorePercent,
@@ -36,7 +34,6 @@ export function KaraokeCanvas({
     }
   })
 
-  // Init renderer and RAF loop once
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -66,13 +63,16 @@ export function KaraokeCanvas({
       cancelAnimationFrame(rafRef.current)
       observer.disconnect()
     }
-  }, [])  // intentionally empty — loop reads stateRef which is always current
+  }, [])
 
-  // Update note range when MIDI changes
+  // Update MIDI note range and page size when MIDI changes
   useEffect(() => {
     if (!parsed || !rendererRef.current) return
     const { min, max } = getNoteRange(parsed.notes)
-    rendererRef.current.setOptions({ minMidi: min, maxMidi: max })
+    // Estimate a good page size: aim for about 6–8 notes per page
+    // Use the median note duration as a guide, or default to 4 s
+    const pageSeconds = computePageSeconds(parsed)
+    rendererRef.current.setOptions({ minMidi: min, maxMidi: max, pageSeconds })
   }, [parsed])
 
   return (
@@ -81,4 +81,17 @@ export function KaraokeCanvas({
       style={{ width: '100%', height: '100%', display: 'block' }}
     />
   )
+}
+
+// Pick a page length that shows roughly one musical phrase.
+// Uses tempo to compute measure length, then picks 2 or 4 measures per page.
+function computePageSeconds(parsed: ParsedMidi): number {
+  if (parsed.tempos.length === 0) return 4
+  const bpm = parsed.tempos[0].bpm
+  const measureSeconds = (60 / bpm) * 4  // 4/4 time assumed
+  // Show 2 measures per page (adjust to keep pages between 3–8 s)
+  const twoBar = measureSeconds * 2
+  if (twoBar >= 3 && twoBar <= 8) return twoBar
+  if (twoBar < 3) return measureSeconds * 4
+  return measureSeconds
 }
